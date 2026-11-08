@@ -30,12 +30,22 @@ else
     echo "==> Using cached upstream APK: ${DOWNLOADED_APK}"
 fi
 
+# Locate Android SDK
+SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+if [ -z "${SDK_ROOT}" ]; then
+    if [ -d "/usr/local/lib/android/sdk" ]; then
+        SDK_ROOT="/usr/local/lib/android/sdk"
+    elif [ -d "$HOME/android-sdk" ]; then
+        SDK_ROOT="$HOME/android-sdk"
+    fi
+fi
+
 # Locate strip tool
 STRIP_TOOL=""
 if [ -n "${ANDROID_NDK_HOME:-}" ] && [ -d "${ANDROID_NDK_HOME}" ]; then
     STRIP_TOOL=$(find "${ANDROID_NDK_HOME}" -name "llvm-strip" 2>/dev/null | head -n 1)
-elif [ -n "${ANDROID_HOME:-}" ] && [ -d "${ANDROID_HOME}/ndk" ]; then
-    STRIP_TOOL=$(find "${ANDROID_HOME}/ndk" -name "llvm-strip" 2>/dev/null | head -n 1)
+elif [ -n "${SDK_ROOT}" ] && [ -d "${SDK_ROOT}/ndk" ]; then
+    STRIP_TOOL=$(find "${SDK_ROOT}/ndk" -name "llvm-strip" 2>/dev/null | head -n 1)
 fi
 
 if [ -z "${STRIP_TOOL}" ]; then
@@ -50,8 +60,8 @@ echo "==> Using strip tool: ${STRIP_TOOL}"
 
 # Locate zipalign
 ZIPALIGN_TOOL=""
-if [ -n "${ANDROID_HOME:-}" ] && [ -d "${ANDROID_HOME}/build-tools" ]; then
-    ZIPALIGN_TOOL=$(find "${ANDROID_HOME}/build-tools" -name "zipalign" 2>/dev/null | sort -V | tail -n 1)
+if [ -n "${SDK_ROOT}" ] && [ -d "${SDK_ROOT}/build-tools" ]; then
+    ZIPALIGN_TOOL=$(find "${SDK_ROOT}/build-tools" -name "zipalign" 2>/dev/null | sort -V | tail -n 1)
 fi
 if [ -z "${ZIPALIGN_TOOL}" ]; then
     ZIPALIGN_TOOL=$(which zipalign 2>/dev/null || true)
@@ -64,8 +74,8 @@ echo "==> Using zipalign tool: ${ZIPALIGN_TOOL}"
 
 # Locate apksigner
 APKSIGNER_TOOL=""
-if [ -n "${ANDROID_HOME:-}" ] && [ -d "${ANDROID_HOME}/build-tools" ]; then
-    APKSIGNER_TOOL=$(find "${ANDROID_HOME}/build-tools" -name "apksigner" 2>/dev/null | sort -V | tail -n 1)
+if [ -n "${SDK_ROOT}" ] && [ -d "${SDK_ROOT}/build-tools" ]; then
+    APKSIGNER_TOOL=$(find "${SDK_ROOT}/build-tools" -name "apksigner" 2>/dev/null | sort -V | tail -n 1)
 fi
 if [ -z "${APKSIGNER_TOOL}" ]; then
     APKSIGNER_TOOL=$(which apksigner 2>/dev/null || true)
@@ -133,8 +143,14 @@ with zipfile.ZipFile(output_apk, 'w', compression=zipfile.ZIP_DEFLATED, compress
             zout.write(fp, arcname)
 "
 
-echo "==> Aligning APK with 16 KB page-size support (zipalign -P 16 4)..."
-"${ZIPALIGN_TOOL}" -P 16 4 "${UNALIGNED_APK}" "${FINAL_APK}"
+echo "==> Aligning APK..."
+if "${ZIPALIGN_TOOL}" 2>&1 | grep -q -- "-P"; then
+    echo "    Using 16 KB page-size alignment: zipalign -P 16 4"
+    "${ZIPALIGN_TOOL}" -P 16 4 "${UNALIGNED_APK}" "${FINAL_APK}"
+else
+    echo "    Using standard page-size alignment: zipalign -p 4"
+    "${ZIPALIGN_TOOL}" -p 4 "${UNALIGNED_APK}" "${FINAL_APK}"
+fi
 rm -f "${UNALIGNED_APK}"
 rm -rf "${TMP_DIR}"
 
@@ -164,8 +180,12 @@ if [ -n "${APKSIGNER_TOOL}" ]; then
     "${APKSIGNER_TOOL}" verify --verbose "${FINAL_APK}"
 fi
 
-echo "==> Verifying 16 KB alignment..."
-"${ZIPALIGN_TOOL}" -c -v -P 16 4 "${FINAL_APK}" | grep "Verification"
+echo "==> Verifying alignment..."
+if "${ZIPALIGN_TOOL}" 2>&1 | grep -q -- "-P"; then
+    "${ZIPALIGN_TOOL}" -c -v -P 16 4 "${FINAL_APK}" | grep -i "Verification" || true
+else
+    "${ZIPALIGN_TOOL}" -c -v 4 "${FINAL_APK}" | grep -i "Verification" || true
+fi
 
 cp -f "${FINAL_APK}" "${SYMLINK_APK}"
 

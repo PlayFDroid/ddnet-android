@@ -32,14 +32,13 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Setup Tools and Android SDK
+      - name: Setup Android SDK
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y llvm zipalign apksigner
           mkdir -p $HOME/.android
           keytool -genkey -v -keystore $HOME/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Debug, OU=Debug, O=Debug, L=Debug, ST=Debug, C=Debug"
-          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
-          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "build-tools;35.0.0" || true
+          export ANDROID_HOME="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "build-tools;35.0.0" || true
 
       - name: Setup Signing Keystore
         id: setup-keystore
