@@ -8,8 +8,8 @@ TMP_DIR="${BUILD_DIR}/tmp"
 DDNET_VERSION="${1:-${DDNET_VERSION:-}}"
 
 if [ -z "${DDNET_VERSION}" ] || [ "${DDNET_VERSION}" = "latest" ]; then
-    echo "==> Fetching latest DDNet release version from GitHub API..."
-    DDNET_VERSION=$(curl -sL https://api.github.com/repos/ddnet/ddnet/releases/latest | grep '"tag_name":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' | sed 's/^v//')
+    echo "==> Fetching latest DDNet release version from ddnet.org..."
+    DDNET_VERSION=$(curl -sL https://ddnet.org/downloads/ | grep -o 'DDNet-[0-9][0-9.]*\.apk' | head -n 1 | sed 's/DDNet-//' | sed 's/\.apk//')
     if [ -z "${DDNET_VERSION}" ]; then
         DDNET_VERSION="20.2.1"
     fi
@@ -20,7 +20,7 @@ echo "==> Target DDNet version: ${DDNET_VERSION}"
 mkdir -p "${BUILD_DIR}"
 mkdir -p "${TMP_DIR}"
 
-APK_URL="https://github.com/ddnet/ddnet/releases/download/${DDNET_VERSION}/DDNet-${DDNET_VERSION}.apk"
+APK_URL="https://ddnet.org/downloads/DDNet-${DDNET_VERSION}.apk"
 DOWNLOADED_APK="${BUILD_DIR}/DDNet-${DDNET_VERSION}-upstream.apk"
 
 if [ ! -f "${DOWNLOADED_APK}" ]; then
