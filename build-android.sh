@@ -128,19 +128,29 @@ SYMLINK_APK="${BUILD_DIR}/ddnet.apk"
 
 rm -f "${UNALIGNED_APK}" "${FINAL_APK}" "${SYMLINK_APK}"
 
-echo "==> Repacking APK with maximum deflate compression..."
+echo "==> Repacking APK..."
 python3 -c "
 import os, zipfile
 
 unpack_dir = '${UNPACK_DIR}'
+orig_apk = '${DOWNLOADED_APK}'
 output_apk = '${UNALIGNED_APK}'
 
-with zipfile.ZipFile(output_apk, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zout:
+compress_map = {}
+with zipfile.ZipFile(orig_apk, 'r') as zin:
+    for info in zin.infolist():
+        compress_map[info.filename] = info.compress_type
+
+with zipfile.ZipFile(output_apk, 'w') as zout:
     for root, dirs, files in os.walk(unpack_dir):
         for f in sorted(files):
             fp = os.path.join(root, f)
             arcname = os.path.relpath(fp, unpack_dir)
-            zout.write(fp, arcname)
+            c_type = compress_map.get(arcname, zipfile.ZIP_DEFLATED)
+            # resources.arsc MUST be stored uncompressed (ZIP_STORED) for Android 11+ (API 30+)
+            if arcname == 'resources.arsc':
+                c_type = zipfile.ZIP_STORED
+            zout.write(fp, arcname, compress_type=c_type)
 "
 
 echo "==> Aligning APK..."
