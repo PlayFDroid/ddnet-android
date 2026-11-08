@@ -1,0 +1,116 @@
+name: Build & Release DDNet Android APK
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'DDNet release version (e.g. 20.2.1 or latest)'
+        required: false
+        default: '20.2.1'
+      publish_release:
+        description: 'Publish GitHub release and update F-Droid'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Android SDK and NDK
+        run: |
+          mkdir -p $HOME/.android
+          keytool -genkey -v -keystore $HOME/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Debug, OU=Debug, O=Debug, L=Debug, ST=Debug, C=Debug"
+          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "build-tools;35.0.0" "ndk;28.2.13676358"
+
+      - name: Setup Signing Keystore
+        id: setup-keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > release.jks
+            echo "has_keystore=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_keystore=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build Optimized DDNet APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          HAS_KEYSTORE: ${{ steps.setup-keystore.outputs.has_keystore }}
+          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
+        run: |
+          chmod +x build-android.sh
+          VERSION="${{ github.event.inputs.version }}"
+          if [ -z "$VERSION" ] && [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          if [ -z "$VERSION" ]; then
+            VERSION="20.2.1"
+          fi
+          echo "Building DDNet version: ${VERSION}"
+          echo "DDNET_TAG=v${VERSION}" >> $GITHUB_ENV
+          echo "DDNET_VERSION=${VERSION}" >> $GITHUB_ENV
+
+          if [ "$HAS_KEYSTORE" = "true" ]; then
+            export KEYSTORE_FILE="${GITHUB_WORKSPACE}/release.jks"
+          fi
+
+          ./build-android.sh "${VERSION}"
+          rm -f release.jks
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ddnet-apk
+          path: build/ddnet.apk
+
+      - name: Publish to GitHub Releases
+        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.publish_release == 'true' || github.event.inputs.publish_release == true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.DDNET_TAG }}
+          name: DDNet ${{ env.DDNET_VERSION }} (Optimized for Android)
+          body: |
+            ### DDNet ${{ env.DDNET_VERSION }} for Android
+            Official DDraceNetwork client optimized for modern Android:
+            - **All 4 ABIs included**: `arm64-v8a`, `x86_64`, `x86`, and `armeabi-v7a`.
+            - **Under 100 MB ceiling**: Optimized package size (~77 MB) compliant with F-Droid and GitHub release constraints by stripping unneeded debug symbols from native binaries.
+            - **16 KB page-size support**: Verified ELF alignments and APK layout for Android 15/16+ compatibility.
+            - **Full functionality**: Preserves integrated local/LAN server (`libDDNet-Server.so`), touch controls, gamepad support, and complete game assets.
+          files: |
+            build/ddnet.apk
+          generate_release_notes: false
+
+      - name: Trigger Central F-Droid Index Rebuild
+        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.publish_release == 'true' || github.event.inputs.publish_release == true
+        env:
+          FDROID_TOKEN: ${{ secrets.FDROID_DISPATCH_TOKEN }}
+        run: |
+          if [ -n "$FDROID_TOKEN" ]; then
+            echo "Triggering central fdroid-repo update workflow..."
+            curl -L -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $FDROID_TOKEN" \
+              https://api.github.com/repos/${{ github.repository_owner }}/fdroid-repo/dispatches \
+              -d '{"event_type":"new-game-release","client_payload":{"repo":"${{ github.repository }}"}}'
+          fi

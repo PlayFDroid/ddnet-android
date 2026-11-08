@@ -1,0 +1,1 @@
+Kooperacyjna platformówka 2D oparta na fizyce i mechanice liny z hakiem.

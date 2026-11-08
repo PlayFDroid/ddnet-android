@@ -1,0 +1,10 @@
+DDraceNetwork (DDNet) is an actively maintained open-source modification of Teeworlds with unique cooperative multiplayer gameplay.
+
+Help each other navigate through custom challenging maps with up to 64 players using your tee's grappling hook and hammer. Race against the clock, compete in global tournaments, or host your own local/LAN server right from your Android device!
+
+Key Features:
+- Cooperative Gameplay: Work together with teammates to complete intricate obstacles, rescue fallen teammates, and solve platforming puzzles.
+- Integrated Local Server: Run a local or LAN server directly on your device from the in-game menu.
+- Worldwide Community: Play across hundreds of official community servers worldwide with connected global ranks.
+- Modern Android Support: Optimized for 64-bit ARM (arm64-v8a) and x86/x86_64 architectures with native 16 KB page-size alignment for Android 15/16+.
+- Customizable Controls: Full touch controls, on-screen layout customization, and external Bluetooth/USB gamepad support.

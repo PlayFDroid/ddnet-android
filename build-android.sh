@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BUILD_DIR="${SCRIPT_DIR}/build"
+TMP_DIR="${BUILD_DIR}/tmp"
+
+DDNET_VERSION="${1:-${DDNET_VERSION:-}}"
+
+if [ -z "${DDNET_VERSION}" ] || [ "${DDNET_VERSION}" = "latest" ]; then
+    echo "==> Fetching latest DDNet release version from GitHub API..."
+    DDNET_VERSION=$(curl -sL https://api.github.com/repos/ddnet/ddnet/releases/latest | grep '"tag_name":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' | sed 's/^v//')
+    if [ -z "${DDNET_VERSION}" ]; then
+        DDNET_VERSION="20.2.1"
+    fi
+fi
+
+echo "==> Target DDNet version: ${DDNET_VERSION}"
+
+mkdir -p "${BUILD_DIR}"
+mkdir -p "${TMP_DIR}"
+
+APK_URL="https://github.com/ddnet/ddnet/releases/download/${DDNET_VERSION}/DDNet-${DDNET_VERSION}.apk"
+DOWNLOADED_APK="${BUILD_DIR}/DDNet-${DDNET_VERSION}-upstream.apk"
+
+if [ ! -f "${DOWNLOADED_APK}" ]; then
+    echo "==> Downloading upstream APK: ${APK_URL}"
+    curl -fL -o "${DOWNLOADED_APK}" "${APK_URL}"
+else
+    echo "==> Using cached upstream APK: ${DOWNLOADED_APK}"
+fi
+
+# Locate strip tool
+STRIP_TOOL=""
+if [ -n "${ANDROID_NDK_HOME:-}" ] && [ -d "${ANDROID_NDK_HOME}" ]; then
+    STRIP_TOOL=$(find "${ANDROID_NDK_HOME}" -name "llvm-strip" 2>/dev/null | head -n 1)
+elif [ -n "${ANDROID_HOME:-}" ] && [ -d "${ANDROID_HOME}/ndk" ]; then
+    STRIP_TOOL=$(find "${ANDROID_HOME}/ndk" -name "llvm-strip" 2>/dev/null | head -n 1)
+fi
+
+if [ -z "${STRIP_TOOL}" ]; then
+    STRIP_TOOL=$(which llvm-strip 2>/dev/null || which strip 2>/dev/null || true)
+fi
+
+if [ -z "${STRIP_TOOL}" ]; then
+    echo "ERROR: llvm-strip or strip not found!" >&2
+    exit 1
+fi
+echo "==> Using strip tool: ${STRIP_TOOL}"
+
+# Locate zipalign
+ZIPALIGN_TOOL=""
+if [ -n "${ANDROID_HOME:-}" ] && [ -d "${ANDROID_HOME}/build-tools" ]; then
+    ZIPALIGN_TOOL=$(find "${ANDROID_HOME}/build-tools" -name "zipalign" 2>/dev/null | sort -V | tail -n 1)
+fi
+if [ -z "${ZIPALIGN_TOOL}" ]; then
+    ZIPALIGN_TOOL=$(which zipalign 2>/dev/null || true)
+fi
+if [ -z "${ZIPALIGN_TOOL}" ]; then
+    echo "ERROR: zipalign not found!" >&2
+    exit 1
+fi
+echo "==> Using zipalign tool: ${ZIPALIGN_TOOL}"
+
+# Locate apksigner
+APKSIGNER_TOOL=""
+if [ -n "${ANDROID_HOME:-}" ] && [ -d "${ANDROID_HOME}/build-tools" ]; then
+    APKSIGNER_TOOL=$(find "${ANDROID_HOME}/build-tools" -name "apksigner" 2>/dev/null | sort -V | tail -n 1)
+fi
+if [ -z "${APKSIGNER_TOOL}" ]; then
+    APKSIGNER_TOOL=$(which apksigner 2>/dev/null || true)
+fi
+
+UNPACK_DIR="${TMP_DIR}/unpacked"
+rm -rf "${UNPACK_DIR}"
+mkdir -p "${UNPACK_DIR}"
+
+echo "==> Unpacking upstream APK..."
+unzip -q -o "${DOWNLOADED_APK}" -d "${UNPACK_DIR}"
+
+# Remove existing signatures
+rm -rf "${UNPACK_DIR}/META-INF"
+
+# Strip all .so libraries
+echo "==> Stripping unneeded symbols from native libraries..."
+SO_COUNT=0
+while IFS= read -r -d '' so_file; do
+    "${STRIP_TOOL}" --strip-unneeded "${so_file}"
+    SO_COUNT=$((SO_COUNT + 1))
+done < <(find "${UNPACK_DIR}/lib" -type f -name "*.so" -print0)
+echo "==> Stripped ${SO_COUNT} shared libraries."
+
+# Filter ABIs if ABIS env is defined (e.g. ABIS="arm64-v8a,x86_64,x86")
+if [ -n "${ABIS:-}" ]; then
+    echo "==> Filtering ABIs to: ${ABIS}"
+    IFS=',' read -r -a KEEP_ABIS <<< "${ABIS}"
+    for abi_path in "${UNPACK_DIR}/lib"/*; do
+        if [ -d "${abi_path}" ]; then
+            abi_name=$(basename "${abi_path}")
+            keep=0
+            for k in "${KEEP_ABIS[@]}"; do
+                if [ "${abi_name}" = "${k}" ]; then
+                    keep=1
+                    break
+                fi
+            done
+            if [ $keep -eq 0 ]; then
+                echo "    Removing ABI: ${abi_name}"
+                rm -rf "${abi_path}"
+            fi
+        fi
+    done
+fi
+
+UNALIGNED_APK="${TMP_DIR}/repacked.unaligned.apk"
+FINAL_APK="${BUILD_DIR}/ddnet-${DDNET_VERSION}.apk"
+SYMLINK_APK="${BUILD_DIR}/ddnet.apk"
+
+rm -f "${UNALIGNED_APK}" "${FINAL_APK}" "${SYMLINK_APK}"
+
+echo "==> Repacking APK with maximum deflate compression..."
+python3 -c "
+import os, zipfile
+
+unpack_dir = '${UNPACK_DIR}'
+output_apk = '${UNALIGNED_APK}'
+
+with zipfile.ZipFile(output_apk, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zout:
+    for root, dirs, files in os.walk(unpack_dir):
+        for f in sorted(files):
+            fp = os.path.join(root, f)
+            arcname = os.path.relpath(fp, unpack_dir)
+            zout.write(fp, arcname)
+"
+
+echo "==> Aligning APK with 16 KB page-size support (zipalign -P 16 4)..."
+"${ZIPALIGN_TOOL}" -P 16 4 "${UNALIGNED_APK}" "${FINAL_APK}"
+rm -f "${UNALIGNED_APK}"
+rm -rf "${TMP_DIR}"
+
+if [ -n "${APKSIGNER_TOOL}" ]; then
+    echo "==> Signing APK..."
+    if [ -n "${KEYSTORE_FILE:-}" ] && [ -f "${KEYSTORE_FILE}" ]; then
+        echo "    Using custom keystore: ${KEYSTORE_FILE}"
+        "${APKSIGNER_TOOL}" sign \
+            --ks "${KEYSTORE_FILE}" \
+            --ks-key-alias "${KEY_ALIAS}" \
+            --ks-pass "pass:${KEYSTORE_PASSWORD}" \
+            --key-pass "pass:${KEY_PASSWORD}" \
+            "${FINAL_APK}"
+    elif [ -f "$HOME/.android/debug.keystore" ]; then
+        echo "    Using debug keystore: $HOME/.android/debug.keystore"
+        "${APKSIGNER_TOOL}" sign \
+            --ks "$HOME/.android/debug.keystore" \
+            --ks-key-alias "androiddebugkey" \
+            --ks-pass "pass:android" \
+            --key-pass "pass:android" \
+            "${FINAL_APK}"
+    else
+        echo "WARNING: No keystore found. Output APK is unsigned."
+    fi
+
+    echo "==> Verifying signature..."
+    "${APKSIGNER_TOOL}" verify --verbose "${FINAL_APK}"
+fi
+
+echo "==> Verifying 16 KB alignment..."
+"${ZIPALIGN_TOOL}" -c -v -P 16 4 "${FINAL_APK}" | grep "Verification"
+
+cp -f "${FINAL_APK}" "${SYMLINK_APK}"
+
+FINAL_SIZE=$(du -h "${FINAL_APK}" | cut -f1)
+echo "=========================================================="
+echo "SUCCESS! Created optimized DDNet APK:"
+echo "Path: ${FINAL_APK} (${FINAL_SIZE})"
+echo "Path: ${SYMLINK_APK} (${FINAL_SIZE})"
+echo "=========================================================="

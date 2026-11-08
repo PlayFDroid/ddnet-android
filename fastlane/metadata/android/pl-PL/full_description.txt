@@ -1,0 +1,10 @@
+DDraceNetwork (DDNet) to aktywnie rozwijana, otwartoźródłowa kontynuacja i modyfikacja gry Teeworlds, stawiająca na unikalną, kooperacyjną rozgrywkę wieloosobową.
+
+Współpracuj z innymi graczami, pokonując wymagające mapy pełne przeszkód, kolców i laserów za pomocą liny z hakiem oraz młotka. Ratuj towarzyszy przed wpadnięciem w zamrożenie, bierz udział w globalnych rankingach lub uruchamiaj własne lokalne serwery bezpośrednio na telefonie!
+
+Najważniejsze cechy:
+- Rozgrywka kooperacyjna: Wspólne pokonywanie przeszkód, wzajemne ratowanie się przed pułapkami i precyzyjna fizyka Teeworlds.
+- Wbudowany serwer lokalny: Możliwość uruchomienia serwera gry offline lub przez Wi-Fi bezpośrednio na urządzeniu z Androidem.
+- Globalna społeczność: Dostęp do setek oficjalnych serwerów na całym świecie z połączonym systemem punktów i rankingów.
+- Zoptymalizowany dla nowoczesnego Androida: Pełne wsparcie dla 64-bitowych architektur ARM (arm64-v8a) oraz x86_64/x86, z zachowaniem wyrównania stron 16 KB dla Androida 15/16+.
+- Sterowanie dotykowe i pad: Konfigurowalny interfejs dotykowy oraz obsługa fizycznych gamepadów (Bluetooth/USB).
